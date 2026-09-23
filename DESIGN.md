@@ -1,8 +1,8 @@
-# Distributed URL Shortener — Design Proposal
+# Distributed URL Shortener — Design and Evaluation
 
-Status: **Proposed — awaiting approval**
+Status: **Implemented locally — scaling evaluation pending documented results**
 
-Scope: architecture and implementation plan; no application code or measured load results yet
+Scope: implemented architecture, operational tradeoffs, and load/scaling evaluation plan. The API, worker, local deployment, telemetry, tests, and load generator are present. See [README.md](README.md#development-and-verification) for recorded verification and [known limitations](README.md#known-limitations) for outstanding evidence. No saved load/scaling measurements are included in this directory.
 
 ## 1. Goals and non-goals
 
@@ -34,7 +34,7 @@ These are evaluation targets, not measured claims:
 - End-to-end exactly-once analytics across the HTTP response, SQS, and DynamoDB. The design provides exactly-once aggregate effects for every event accepted by SQS.
 - Unique-visitor analytics or storage of IP addresses.
 
-## 2. Proposed architecture
+## 2. Architecture
 
 ```mermaid
 flowchart LR
@@ -91,7 +91,7 @@ Response (`201 Created`):
 ```
 
 - Accept only absolute `http` and `https` URLs with a host.
-- Enforce a configured maximum length (proposed: 2,048 bytes).
+- Enforce a configured maximum length (default: 2,048 bytes).
 - Set expiry from a deployment setting, `LINK_TTL`, with a default of 30 days. The first API version does not allow callers to override it per request.
 - Different create calls for the same URL may produce different codes. Idempotency keys can be future work.
 - Return `400` for invalid input, `429` when admission limits are exceeded, and `503` for unavailable dependencies.
@@ -150,7 +150,7 @@ The conditional write is the uniqueness authority. Collisions are expected to be
 
 DynamoDB is selected because the dominant operations are point reads and conditional inserts keyed by a uniformly distributed short code. It removes a relational primary and connection pool as horizontal scaling boundaries, provides managed partitioning and availability, and supports conditional and transactional writes needed for uniqueness and analytics deduplication. On-demand capacity is the initial production mode because demo and early traffic are unpredictable; provisioned capacity can be evaluated after a stable traffic profile exists.
 
-Proposed logical tables:
+Logical tables:
 
 | Table | Partition key | Important attributes | Purpose |
 |---|---|---|---|
@@ -165,7 +165,7 @@ Notes:
 - `ttl` is the same instant as `expires_at`, represented as Unix epoch seconds for DynamoDB TTL cleanup. Because TTL deletion is asynchronous, every application read still enforces `expires_at`; while an expired item remains, redirect returns `410`, and after physical deletion it returns `404`.
 - Raw click events remain in SQS only for the configured message-retention period. DynamoDB stores aggregates rather than an indefinitely growing click-event history.
 - Retain `ProcessedEvents` records longer than the maximum SQS retention and redrive window. Their DynamoDB TTL then removes them asynchronously without a cleanup worker.
-- `LinkStats` uses a fixed initial shard count (proposed: 16). A deterministic hash of `event_id` selects the shard, preventing one popular link from concentrating all analytics writes on one item. Stats reads fetch and sum all shards.
+- `LinkStats` uses a fixed initial shard count (16). A deterministic hash of `event_id` selects the shard, preventing one popular link from concentrating all analytics writes on one item. Stats reads fetch and sum all shards.
 - SDK calls use bounded concurrency, deadlines, jittered backoff for retryable throttling, and propagated Go context cancellation. Unlike PostgreSQL, API replicas do not consume database connections.
 - Enable point-in-time recovery for production tables. DynamoDB Local does not represent production durability or availability.
 - No secondary indexes are required for the initial access patterns; operational scans must not be placed on request paths.
@@ -209,7 +209,7 @@ Cache policy:
 
 - Cache-aside keys: `link:{code}` containing destination URL and absolute expiry.
 - Positive TTL: `min(24 hours plus downward jitter, time until link expiry)`, so Redis cannot serve a link beyond its expiry.
-- Negative TTL: proposed 30 seconds to protect DynamoDB from repeated random-code scans.
+- Negative TTL: 30 seconds to protect DynamoDB from repeated random-code scans.
 - In-process request coalescing for the same missing hot key is optional after measurement; avoid a new dependency merely to implement it.
 - Redis is an optimization for URL lookup, so cache failure falls back to DynamoDB.
 - Populate cache after a successful create as a best-effort optimization.
@@ -271,7 +271,7 @@ Graceful shutdown marks a replica unready, stops accepting new work, and drains 
 
 ## 9. Observability
 
-Use structured JSON logs, Prometheus metrics, Grafana dashboards, and OpenTelemetry-compatible trace instrumentation. To keep the initial Go implementation stdlib-first, direct Prometheus exposition and trace propagation can be implemented locally; adding official client SDKs should be approved if the dependency constraint is strict.
+The implementation uses structured JSON logs, the Prometheus Go client, a provisioned Grafana dashboard, and W3C trace-context propagation for log correlation. Distributed span collection/export is not configured. Queue-wide oldest-message age is available through AWS CloudWatch; local worker event-age histograms measure only received messages.
 
 ### Metrics
 
@@ -303,7 +303,7 @@ Logs include request/trace ID, route, status, duration, and error class. They ex
 
 ## 10. Load-test and scaling plan
 
-Use `k6` (external test tool, not an application dependency) with a seeded pool of codes and a realistic distribution:
+The implemented `cmd/loadgen` tool generates an open-loop workload with a seeded pool of codes and a realistic distribution:
 
 - 95% `GET /{code}`, including a Zipf-like hot set and a small unknown-code fraction.
 - 5% `POST /shorten` with valid distinct URLs.
@@ -328,7 +328,7 @@ Do not predict the bottleneck in the final report. Identify it from correlated e
 
 Local DynamoDB results validate functionality only. Any claim about storage scalability or saturation must use a real, isolated AWS DynamoDB table, report its capacity mode and safeguards, and separate service limits/cost guards from application bottlenecks.
 
-### Results template
+### Pending scaling results
 
 | Configuration | Offered RPS | Achieved RPS | Redirect p50/p95/p99 | Create p95 | Error % | Cache hit % | Oldest event | Bottleneck |
 |---|---:|---:|---|---:|---:|---:|---:|---|
@@ -336,7 +336,15 @@ Local DynamoDB results validate functionality only. Any claim about storage scal
 | Baseline saturation | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 | Scaled | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 
-The implementation must not fill this table with estimates. Preserve Prometheus snapshots/screenshots and the exact load-test command/config for reproducibility.
+No saved results were found in the project during this documentation update. The table remains pending evidence, rather than estimates. The closed-loop mixed HTTP test is a separate functional load check and cannot establish the scaling results above.
+
+To retain numerical evidence in a future explicitly opted-in run against a running stack:
+
+```sh
+go run ./cmd/loadgen -base http://localhost:8080 -rates 200,500,1000,2000 -stage 30s -json /tmp/shortener-load-results.json
+```
+
+Preserve the output with the exact command, replica counts, host resources, cache state, and matching telemetry before drawing bottleneck or scaling conclusions. This command has not been run as part of this documentation update.
 
 ## 11. Security and operational controls
 
@@ -349,18 +357,16 @@ The implementation must not fill this table with estimates. Preserve Prometheus 
 - DynamoDB TTL performs eventual physical cleanup; expiry enforcement does not depend on deletion timing.
 - Table creation and configuration are infrastructure-as-code deployment steps, not startup side effects of every API replica.
 
-## 12. Delivery plan
+## 12. Implementation and evaluation status
 
-1. Implement configuration, DynamoDB table definitions, repository, random code generation, and API endpoints with unit/integration tests.
-2. Add Redis cache behavior, failure timeouts, and cache metrics.
-3. Add SQS analytics producer/worker, sharded counters, per-event transactions, visibility/redrive behavior, and failure tests.
-4. Add DynamoDB Local, LocalStack SQS, and one Redis cache server to Compose, plus health checks, Prometheus, Grafana dashboards, and structured logging/tracing.
-5. Add infrastructure for an isolated AWS test environment, run the repeatable load test, find saturation, apply scaling changes, and record measured results.
-6. Document runbooks, observed failure modes, improvements, and future work in the README.
+- Implemented: API/configuration, DynamoDB repositories, Redis cache, SQS producer/worker, deduplication and sharded counters, and unit/integration/load/stress test suites.
+- Implemented locally: Compose dependencies, health checks, Prometheus, Grafana provisioning, structured logging, trace propagation, and operational runbooks.
+- Available for evaluation: AWS data/monitoring infrastructure template and the open-loop 95/5 load generator. The AWS template has not been deployed or validated against AWS.
+- Pending documented evidence: baseline and saturation measurements, correlated bottleneck analysis, and a comparable before/after scaling run. See section 10 and the README limitations.
 
-## 13. Decisions requested from reviewer
+## 13. Design decisions
 
-Approval of this document means accepting these initial tradeoffs:
+The implementation follows these tradeoffs:
 
 1. DynamoDB is the source of truth, using on-demand capacity initially; Redis is only the disposable cache, and SQS Standard is the managed analytics queue.
 2. Codes are random 10-character Base62 values created with conditional writes; they resist casual enumeration but are not authorization secrets.
@@ -369,7 +375,7 @@ Approval of this document means accepting these initial tradeoffs:
 5. Analytics use SQS Standard at-least-once transport, 16 counter shards per link, and per-event DynamoDB transactions, providing exactly-once aggregate effects for SQS-accepted events but not end-to-end exactly-once capture.
 6. DynamoDB Local and LocalStack SQS are for development only; credible scale and durability results require AWS. Initial production design is single-region; global tables, authentication, custom aliases, caller-selected expiry, and advanced abuse controls are future work.
 
-If any decision is declined, it should be resolved before implementation because it changes APIs, schema, or failure semantics.
+Revisiting these decisions may require API, schema, or failure-semantics changes.
 
 ## 14. Known limitations
 
@@ -378,7 +384,7 @@ If any decision is declined, it should be resolved before implementation because
 - DynamoDB introduces AWS coupling, request-based cost, and operational dependence on correct partition-key and capacity design.
 - Per-event analytics transactions prioritize correctness over write cost and maximum throughput; measurements may justify a more complex batching design.
 - Aggregate-only analytics cannot reconstruct arbitrary historical time series.
-- Capacity, latency, and saturation are unknown until the implementation is load-tested; all SLOs above are targets.
+- Sustainable capacity, saturation, and before/after scaling improvements remain unsubstantiated by saved measurements in this directory; all SLOs above remain evaluation targets.
 
 ## 15. DynamoDB implementation references
 

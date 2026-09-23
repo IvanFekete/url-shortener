@@ -41,4 +41,4 @@ Fill in the "Project-specific" section during the first few minutes of any new t
 - Concurrency model (if chosen): Stateless API replicas; asynchronous analytics workers using SQS long polling and visibility timeouts; bounded request and worker concurrency.
 - Explicitly out of scope for this session: Production capacity measurements; multi-region deployment; authentication/billing; custom aliases and caller-selected expiry.
 
-- Current task: Diagnose and fix mixed HTTP load-test failures; verify the required race suite and opted-in load test without new dependencies.
+- Current task: Refresh DESIGN.md implementation status and README measurement limitations using available evidence; source code delivery and Grafana screenshots/snapshots are excluded.
