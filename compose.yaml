@@ -1,0 +1,98 @@
+x-app: &app
+  build: .
+  environment: &environment
+    AWS_REGION: us-east-1
+    AWS_ACCESS_KEY_ID: local
+    AWS_SECRET_ACCESS_KEY: local
+    DYNAMODB_ENDPOINT: http://dynamodb:8000
+    CACHE_REDIS_URL: redis://cache:6379
+    SQS_ENDPOINT: http://localstack:4566
+    SQS_QUEUE_URL: http://localstack:4566/queue/us-east-1/000000000000/redirects
+    SQS_DLQ_URL: http://localstack:4566/queue/us-east-1/000000000000/redirects-dlq
+    BASE_URL: http://localhost:8080
+    LINK_TTL: ${LINK_TTL:-720h}
+  restart: unless-stopped
+
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:3.1.0
+    command: -jar DynamoDBLocal.jar -sharedDb -dbPath /data
+    user: root
+    volumes: ['dynamodb:/data']
+  cache:
+    image: redis:7.4-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save ""
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+  localstack:
+    image: localstack/localstack:4.7.0
+    environment:
+      SERVICES: sqs
+      SQS_ENDPOINT_STRATEGY: path
+      LOCALSTACK_HOST: localstack:4566
+    healthcheck:
+      test: [CMD, awslocal, sqs, list-queues]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+  setup:
+    <<: *app
+    entrypoint: [setup]
+    restart: on-failure
+    depends_on:
+      dynamodb: {condition: service_started}
+      localstack: {condition: service_healthy}
+  api:
+    <<: *app
+    deploy:
+      replicas: 2
+    depends_on:
+      setup: {condition: service_completed_successfully}
+      cache: {condition: service_healthy}
+      localstack: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://localhost:8080/health/ready']
+      interval: 10s
+      timeout: 3s
+      retries: 3
+  worker:
+    <<: *app
+    entrypoint: [worker]
+    depends_on:
+      setup: {condition: service_completed_successfully}
+      localstack: {condition: service_healthy}
+    stop_grace_period: 15s
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://localhost:8080/health/ready']
+      interval: 10s
+      timeout: 3s
+      retries: 3
+  ingress:
+    image: haproxy:3.2-alpine
+    ports: ["127.0.0.1:8080:8080"]
+    volumes: ["./deploy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro"]
+    depends_on: [api]
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports: ["127.0.0.1:9090:9090"]
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.76.0
+    environment:
+      REDIS_ADDR: redis://cache:6379
+    depends_on: [cache]
+  grafana:
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-local-development-only}
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["127.0.0.1:3000:3000"]
+volumes:
+  dynamodb:

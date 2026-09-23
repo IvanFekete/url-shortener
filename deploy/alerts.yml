@@ -1,0 +1,52 @@
+groups:
+  - name: shortener
+    rules:
+      - alert: AnalyticsDropped
+        expr: sum(rate(analytics_events_dropped_total[5m])) > 0
+        for: 1m
+        labels: {severity: warning}
+        annotations: {summary: "Redirect analytics are being lost"}
+      - alert: AnalyticsDeliveryStale
+        expr: histogram_quantile(0.99, sum by (le) (rate(analytics_event_age_seconds_bucket[5m]))) > 60
+        for: 1m
+        labels: {severity: warning}
+        annotations: {summary: "Received analytics messages exceed the freshness target; check SQS oldest-message age too"}
+      - alert: APIErrors
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 1) > 0.01
+        for: 2m
+        labels: {severity: warning}
+        annotations: {summary: "API error rate exceeds one percent"}
+      - alert: DeadLetters
+        expr: max(analytics_dlq_depth) > 0
+        labels: {severity: warning}
+        annotations: {summary: "Analytics events need operator inspection"}
+      - alert: RedirectLatency
+        expr: histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{route="/{code}"}[5m]))) > 0.1
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Redirect p99 exceeds 100ms"}
+      - alert: DynamoDBErrors
+        expr: sum(rate(dependency_errors_total{dependency="dynamodb",class=~"throttle|unavailable|conflict"}[5m])) > 0
+        for: 2m
+        labels: {severity: warning}
+        annotations: {summary: "DynamoDB is throttling or failing requests"}
+      - alert: CacheUnavailable
+        expr: redis_up == 0
+        for: 1m
+        labels: {severity: warning}
+        annotations: {summary: "Redis is unavailable; DynamoDB fallback traffic will rise"}
+      - alert: CacheMemoryPressure
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Redis is near its configured memory limit"}
+      - alert: CacheHitRatioLow
+        expr: sum(rate(cache_requests_total{result=~"hit|negative_hit"}[5m])) / clamp_min(sum(rate(cache_requests_total{result=~"hit|negative_hit|miss"}[5m])), 0.001) < 0.8 and sum(rate(cache_requests_total[5m])) > 10
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "Cache hit ratio remains below 80 percent after warm-up"}
+      - alert: WorkerUnavailable
+        expr: absent(up{job="worker"}) or max(up{job="worker"}) == 0
+        for: 1m
+        labels: {severity: warning}
+        annotations: {summary: "No worker metrics target is healthy; inspect SQS backlog"}

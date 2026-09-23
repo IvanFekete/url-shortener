@@ -1,0 +1,491 @@
+{
+  "uid": "url-shortener",
+  "title": "URL Shortener",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Request rate",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (route) (rate(http_requests_total[5m]))",
+          "legendFormat": "__auto"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Redirect latency p50 / p95 / p99",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(http_request_duration_seconds_bucket{route=\"/{code}\"}[5m])))",
+          "legendFormat": "__auto"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{route=\"/{code}\"}[5m])))",
+          "legendFormat": "__auto"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{route=\"/{code}\"}[5m])))",
+          "legendFormat": "__auto"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "HTTP errors and admission rejections",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(http_requests_total{status=~\"4..|5..\"}[5m]))",
+          "legendFormat": "__auto"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Cache hit ratio",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(cache_requests_total{result=~\"hit|negative_hit\"}[5m])) / clamp_min(sum(rate(cache_requests_total{result=~\"hit|negative_hit|miss\"}[5m])), 0.001)",
+          "legendFormat": "__auto"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Dependency p95 latency",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (dependency,operation,le) (rate(dependency_duration_seconds_bucket[5m])))",
+          "legendFormat": "__auto"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Dependency errors",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (dependency,operation,class) (rate(dependency_errors_total[5m]))",
+          "legendFormat": "__auto"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Analytics accepted / processed / duplicate / failed",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (result) (rate(analytics_events_total[5m]))",
+          "legendFormat": "__auto"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Analytics drops",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(analytics_events_dropped_total[5m]))",
+          "legendFormat": "__auto"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "SQS visible / in flight / DLQ",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(analytics_queue_depth)",
+          "legendFormat": "__auto"
+        },
+        {
+          "refId": "B",
+          "expr": "max(analytics_pending_entries)",
+          "legendFormat": "__auto"
+        },
+        {
+          "refId": "C",
+          "expr": "max(analytics_dlq_depth)",
+          "legendFormat": "__auto"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Received event age p99",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(analytics_event_age_seconds_bucket[5m])))",
+          "legendFormat": "__auto"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Process CPU",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (job,instance) (rate(process_cpu_seconds_total[5m]))",
+          "legendFormat": "__auto"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Process memory",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "process_resident_memory_bytes",
+          "legendFormat": "__auto"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "DynamoDB consumed capacity",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 48
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (table,kind) (rate(dynamodb_consumed_capacity_total[5m]))",
+          "legendFormat": "__auto"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "HTTP concurrency and worker limit",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 48
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(http_requests_in_flight)",
+          "legendFormat": "__auto"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(analytics_worker_concurrency)",
+          "legendFormat": "__auto"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "Go goroutines",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "go_goroutines",
+          "legendFormat": "__auto"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "title": "Redis memory / max memory",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "redis_memory_used_bytes",
+          "legendFormat": "__auto"
+        },
+        {
+          "refId": "B",
+          "expr": "redis_memory_max_bytes",
+          "legendFormat": "__auto"
+        }
+      ]
+    }
+  ]
+}

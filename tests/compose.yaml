@@ -1,0 +1,27 @@
+# Isolated, disposable dependencies for tests/integration. No application volumes.
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:3.1.0
+    command: -jar DynamoDBLocal.jar -inMemory -sharedDb
+    ports: ["127.0.0.1:18000:8000"]
+  redis:
+    image: redis:7.4-alpine
+    command: redis-server --save "" --appendonly no
+    ports: ["127.0.0.1:16379:6379"]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+  sqs:
+    image: localstack/localstack:4.7.0
+    environment:
+      SERVICES: sqs
+      SQS_ENDPOINT_STRATEGY: path
+      LOCALSTACK_HOST: localhost:14566
+    ports: ["127.0.0.1:14566:4566"]
+    healthcheck:
+      test: [CMD, awslocal, --endpoint-url, "http://localhost:4566", sqs, list-queues]
+      interval: 2s
+      timeout: 5s
+      retries: 30

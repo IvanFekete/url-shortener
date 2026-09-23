@@ -1,0 +1,162 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Isolated URL shortener data plane, scoped runtime policies and SQS monitoring
+Parameters:
+  MaxReadUnits:
+    Type: Number
+    Default: 1000
+    MinValue: 1
+  MaxWriteUnits:
+    Type: Number
+    Default: 1000
+    MinValue: 1
+  AlarmTopicARN:
+    Type: String
+    Default: ''
+    Description: Optional existing SNS topic for alarms
+Conditions:
+  Notify: !Not [!Equals [!Ref AlarmTopicARN, '']]
+Resources:
+  Links:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: code, AttributeType: S}]
+      KeySchema: [{AttributeName: code, KeyType: HASH}]
+      TimeToLiveSpecification: {AttributeName: ttl, Enabled: true}
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+      SSESpecification: {SSEEnabled: true}
+      OnDemandThroughput:
+        MaxReadRequestUnits: !Ref MaxReadUnits
+        MaxWriteRequestUnits: !Ref MaxWriteUnits
+  Stats:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: code_shard, AttributeType: S}]
+      KeySchema: [{AttributeName: code_shard, KeyType: HASH}]
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+      SSESpecification: {SSEEnabled: true}
+      OnDemandThroughput:
+        MaxReadRequestUnits: !Ref MaxReadUnits
+        MaxWriteRequestUnits: !Ref MaxWriteUnits
+  Events:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: event_id, AttributeType: S}]
+      KeySchema: [{AttributeName: event_id, KeyType: HASH}]
+      TimeToLiveSpecification: {AttributeName: ttl, Enabled: true}
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+      SSESpecification: {SSEEnabled: true}
+      OnDemandThroughput:
+        MaxReadRequestUnits: !Ref MaxReadUnits
+        MaxWriteRequestUnits: !Ref MaxWriteUnits
+  DLQ:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+  Queue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      MessageRetentionPeriod: 345600
+      VisibilityTimeout: 30
+      ReceiveMessageWaitTimeSeconds: 20
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DLQ.Arn
+        maxReceiveCount: 10
+  APIPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: ['dynamodb:GetItem', 'dynamodb:PutItem']
+            Resource: !GetAtt Links.Arn
+          - Effect: Allow
+            Action: ['dynamodb:BatchGetItem']
+            Resource: !GetAtt Stats.Arn
+          - Effect: Allow
+            Action: ['dynamodb:DescribeTable']
+            Resource: [!GetAtt Links.Arn, !GetAtt Stats.Arn, !GetAtt Events.Arn]
+          - Effect: Allow
+            Action: ['sqs:SendMessage']
+            Resource: !GetAtt Queue.Arn
+  WorkerPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: ['dynamodb:GetItem', 'dynamodb:PutItem']
+            Resource: !GetAtt Events.Arn
+          - Effect: Allow
+            Action: ['dynamodb:UpdateItem']
+            Resource: !GetAtt Stats.Arn
+          - Effect: Allow
+            Action: ['dynamodb:DescribeTable']
+            Resource: [!GetAtt Links.Arn, !GetAtt Stats.Arn, !GetAtt Events.Arn]
+          - Effect: Allow
+            Action: ['sqs:ReceiveMessage', 'sqs:DeleteMessage', 'sqs:ChangeMessageVisibility', 'sqs:GetQueueAttributes']
+            Resource: !GetAtt Queue.Arn
+          - Effect: Allow
+            Action: ['sqs:GetQueueAttributes']
+            Resource: !GetAtt DLQ.Arn
+  QueueAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Oldest SQS message exceeds analytics freshness target
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Dimensions: [{Name: QueueName, Value: !GetAtt Queue.QueueName}]
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 60
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [Notify, [!Ref AlarmTopicARN], []]
+  DLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions: [{Name: QueueName, Value: !GetAtt DLQ.QueueName}]
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [Notify, [!Ref AlarmTopicARN], []]
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardBody: !Sub |
+        {"widgets":[
+          {"type":"metric","x":0,"y":0,"width":12,"height":6,"properties":{"title":"SQS oldest age","region":"${AWS::Region}","stat":"Maximum","period":60,"metrics":[["AWS/SQS","ApproximateAgeOfOldestMessage","QueueName","${Queue.QueueName}"]]}},
+          {"type":"metric","x":12,"y":0,"width":12,"height":6,"properties":{"title":"SQS backlog and DLQ","region":"${AWS::Region}","stat":"Maximum","period":60,"metrics":[["AWS/SQS","ApproximateNumberOfMessagesVisible","QueueName","${Queue.QueueName}"],["AWS/SQS","ApproximateNumberOfMessagesNotVisible","QueueName","${Queue.QueueName}"],["AWS/SQS","ApproximateNumberOfMessagesVisible","QueueName","${DLQ.QueueName}"]]}},
+          {"type":"metric","x":0,"y":6,"width":12,"height":6,"properties":{"title":"DynamoDB read/write units","region":"${AWS::Region}","stat":"Sum","period":60,"metrics":[["AWS/DynamoDB","ConsumedReadCapacityUnits","TableName","${Links}"],["AWS/DynamoDB","ConsumedWriteCapacityUnits","TableName","${Links}"],["AWS/DynamoDB","ConsumedWriteCapacityUnits","TableName","${Stats}"],["AWS/DynamoDB","ConsumedWriteCapacityUnits","TableName","${Events}"]]}},
+          {"type":"metric","x":12,"y":6,"width":12,"height":6,"properties":{"title":"DynamoDB throttled requests","region":"${AWS::Region}","stat":"Sum","period":60,"metrics":[["AWS/DynamoDB","ReadThrottleEvents","TableName","${Links}"],["AWS/DynamoDB","WriteThrottleEvents","TableName","${Links}"],["AWS/DynamoDB","WriteThrottleEvents","TableName","${Stats}"],["AWS/DynamoDB","WriteThrottleEvents","TableName","${Events}"]]}}
+        ]}
+Outputs:
+  LinksTable: {Value: !Ref Links}
+  StatsTable: {Value: !Ref Stats}
+  EventsTable: {Value: !Ref Events}
+  QueueURL: {Value: !Ref Queue}
+  DLQURL: {Value: !Ref DLQ}
+  APIPolicyARN: {Value: !Ref APIPolicy}
+  WorkerPolicyARN: {Value: !Ref WorkerPolicy}

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>URL Shortener</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #f3f6fa; color: #17283e; font: 16px/1.6 system-ui, sans-serif; padding: 64px 20px; }
+    main { max-width: 640px; margin: auto; background: white; padding: 40px; border: 1px solid #dce3ec; border-radius: 20px; box-shadow: 0 12px 40px #17283e08; }
+    h1 { font-size: 32px; line-height: 1.2; margin: 0 0 12px; letter-spacing: -1px; }
+    p { color: #536278; margin: 0 0 28px; }
+    label { display: block; font-weight: 600; margin-bottom: 8px; }
+    input { width: 100%; font: inherit; padding: 12px 14px; border: 1px solid #aab8ca; border-radius: 8px; }
+    button, .button { display: inline-block; border: 0; border-radius: 8px; background: #235bda; color: white; padding: 12px 20px; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; margin-top: 16px; }
+    button:disabled { opacity: .65; cursor: wait; }
+    :focus-visible { outline: 3px solid #93b4ff; outline-offset: 3px; }
+    #status { margin: 20px 0 0; }
+    #status.error { color: #ac2433; }
+    #result { margin-top: 24px; padding-top: 24px; border-top: 1px solid #dce3ec; }
+    h2 { font-size: 18px; margin: 0 0 8px; }
+    #short-link { color: #235bda; overflow-wrap: anywhere; }
+    #expiry { font-size: 14px; margin: 12px 0 0; }
+    .hint { font-size: 14px; margin: 12px 0 0; }
+    @media (max-width: 480px) { body { padding: 24px 12px; } main { padding: 24px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Make a long link short.</h1>
+    <p>Paste a URL, shorten it, then open your new link to see the redirect in action.</p>
+    <form id="shorten-form">
+      <label for="url">Destination URL</label>
+      <input id="url" name="url" type="url" placeholder="https://example.com/a/long/path" required autocomplete="url" aria-describedby="url-hint">
+      <p id="url-hint" class="hint">Use a full URL starting with https:// or http://.</p>
+      <button id="submit" type="submit">Shorten URL</button>
+    </form>
+    <p id="status" role="status" aria-live="polite"></p>
+    <section id="result" aria-labelledby="result-title" hidden>
+      <h2 id="result-title">Your short link is ready</h2>
+      <a id="short-link" target="_blank" rel="noopener noreferrer"></a>
+      <p id="expiry"></p>
+      <a id="open-link" class="button" target="_blank" rel="noopener noreferrer">Open short link ↗</a>
+      <p class="hint">Opens in a new tab and redirects to your destination.</p>
+    </section>
+    <noscript>Enable JavaScript to shorten a URL using this page.</noscript>
+  </main>
+  <script>
+    const form = document.querySelector('#shorten-form');
+    const submit = document.querySelector('#submit');
+    const status = document.querySelector('#status');
+    const result = document.querySelector('#result');
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (submit.disabled) return;
+      result.hidden = true;
+      status.className = '';
+      status.textContent = 'Creating your short link…';
+      submit.disabled = true;
+      submit.textContent = 'Shortening…';
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      try {
+        const response = await fetch('/shorten', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: document.querySelector('#url').value.trim() }),
+          signal: controller.signal
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `Request failed (${response.status}). Please try again.`);
+        const shortURL = new URL(data.short_url);
+        if (!['http:', 'https:'].includes(shortURL.protocol)) throw new Error('The API returned an invalid short link.');
+        const link = document.querySelector('#short-link');
+        link.textContent = shortURL.href;
+        link.href = shortURL.href;
+        document.querySelector('#open-link').href = shortURL.href;
+        document.querySelector('#expiry').textContent = `Expires ${new Date(data.expires_at).toLocaleString()}`;
+        result.hidden = false;
+        status.textContent = 'Link created. Open it below to test the redirect.';
+      } catch (error) {
+        status.className = 'error';
+        status.textContent = error.name === 'AbortError'
+          ? 'The request timed out. Please try again.'
+          : error instanceof TypeError
+            ? 'Could not reach the API or read its response. Check that the service is running and try again.'
+            : error.message;
+      } finally {
+        clearTimeout(timeout);
+        submit.disabled = false;
+        submit.textContent = 'Shorten URL';
+      }
+    });
+  </script>
+</body>
+</html>
