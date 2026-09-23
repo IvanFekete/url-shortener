@@ -330,21 +330,7 @@ Local DynamoDB results validate functionality only. Any claim about storage scal
 
 ### Pending scaling results
 
-| Configuration | Offered RPS | Achieved RPS | Redirect p50/p95/p99 | Create p95 | Error % | Cache hit % | Oldest event | Bottleneck |
-|---|---:|---:|---|---:|---:|---:|---:|---|
-| Baseline | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-| Baseline saturation | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-| Scaled | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-
-No saved results were found in the project during this documentation update. The table remains pending evidence, rather than estimates. The closed-loop mixed HTTP test is a separate functional load check and cannot establish the scaling results above.
-
-To retain numerical evidence in a future explicitly opted-in run against a running stack:
-
-```sh
-go run ./cmd/loadgen -base http://localhost:8080 -rates 200,500,1000,2000 -stage 30s -json /tmp/shortener-load-results.json
-```
-
-Preserve the output with the exact command, replica counts, host resources, cache state, and matching telemetry before drawing bottleneck or scaling conclusions. This command has not been run as part of this documentation update.
+[LOAD_RESULTS.md](LOAD_RESULTS.md) contains the run-record requirements, reproduction command, pending measurement table, and outstanding saturation/scaling analysis. No saved measurements were found during this documentation update. The closed-loop mixed HTTP test is a separate functional load check and cannot establish those scaling results.
 
 ## 11. Security and operational controls
 

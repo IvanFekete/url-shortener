@@ -8,9 +8,7 @@ Quick guide to checking that metrics are reported on the local Compose stack.
 - Targets (scrape health): http://localhost:9090/targets
 - Alert rules: http://localhost:9090/rules and http://localhost:9090/alerts
 - Grafana: see the URL in `README.md` (dashboard is provisioned)
-- [PromQL basics](https://prometheus.io/docs/prometheus/latest/querying/basics/)
-- [PromQL functions](https://prometheus.io/docs/prometheus/latest/querying/functions/) (`rate`, `histogram_quantile`)
-- [Histograms and quantiles](https://prometheus.io/docs/practices/histograms/)
+
 
 ## Is anything reported?
 
@@ -26,6 +24,24 @@ docker compose exec prometheus wget -qO- http://api:8080/metrics | grep -E '^(ht
 ```
 
 ## Queries
+
+Quick reference:
+
+| Question | PromQL |
+|---|---|
+| Are requests being counted? | `sum by (route, status) (http_requests_total)` |
+| Request rate | `sum(rate(http_requests_total[1m]))` |
+| Error rate (5xx) | `sum(rate(http_requests_total{status=~"5.."}[1m]))` |
+| p95 latency | `histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket[1m])))` |
+| Rejected by admission control | `rate(http_requests_rejected_total[1m])` |
+| In-flight requests | `http_requests_in_flight` |
+| Cache hits vs. misses | `sum by (result) (rate(cache_requests_total[1m]))` |
+| Analytics events processed | `sum by (result) (rate(analytics_events_total[1m]))` |
+| Dropped analytics events | `analytics_events_dropped_total` |
+| SQS backlog / DLQ | `analytics_queue_depth`, `analytics_dlq_depth` |
+| Dependency errors | `sum by (dependency, operation, class) (dependency_errors_total)` |
+
+More, grouped by area:
 
 Scrape health:
 
